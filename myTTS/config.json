@@ -1,0 +1,25 @@
+{
+  "tts_servers": [
+    {
+      "name": "kokoro-en-us",
+      "model": "kokoro",
+      "url": "http://localhost:8880/v1/audio/speech",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "voices": ["af_heart", "af_bella"]
+    },
+    {
+      "name": "kokoro-en-gb",
+      "model": "kokoro",
+      "url": "http://localhost:8880/v1/audio/speech",
+      "headers": {
+        "Content-Type": "application/json"
+      },
+      "voices": ["bf_emma"]
+    }
+  ],
+  "output_dir": {
+    "audio": "./audio_output"
+  }
+}

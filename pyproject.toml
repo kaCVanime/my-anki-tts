@@ -1,0 +1,6 @@
+[project]
+name = "my-anki-tts"
+version = "0.1.0"
+description = "fetch, tts, then save"
+requires-python = ">=3.11"
+dependencies = ["requests", "loguru", "tqdm"]
