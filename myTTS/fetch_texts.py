@@ -45,6 +45,26 @@ def try_json(s):
         logger.error(f'incorrect JSON:\n---\n {s}')
         return []
 
+def should_add_sentence_audio(tags):
+    """
+    only add sentence audio for intermediates
+    """
+
+    # exclude beginner
+    if "CEFR_A1" in tags:
+        return False
+
+    # very common expressions
+    if "K_高频普通" in tags or "CEFR_A2" in tags:
+        return True
+
+    # common expressions that has CEFR tag
+    if "K_高频进阶" in tags and bool({f"CEFR_{level}" for level in ["B1", "B2", "C1", "C2"]} & set(tags)):
+        return True
+
+    # judge by B1-B2 CEFR for less common expressions
+    return bool(set(tags) & {"CEFR_B1", "CEFR_B2"})
+
 def fetch_texts() -> Iterator[Tuple[str, str]]:
     """
     Fetches texts with unique IDs. This function can be customized by developers.
@@ -53,7 +73,7 @@ def fetch_texts() -> Iterator[Tuple[str, str]]:
 
     text_ids = get_all_text_ids()
     exclude_ids_query = " ".join([f'-id:{id}' for id in text_ids])
-    todos = find_anki_notes(f'("deck:KEXP3::1. 读::1) 基础" OR "deck:KEXP3::1. 读::2) 高频::普通" OR "deck:KEXP3::1. 读::3) 中频") {exclude_ids_query}')
+    todos = find_anki_notes(f'("deck:KEXP3::1. 读::1) 基础" OR "deck:KEXP3::1. 读::2) 高频::普通" OR "deck:KEXP3::1. 读::2) 高频::进阶" OR "deck:KEXP3::1. 读::3) 中频") {exclude_ids_query}')
 
     progress = tqdm(total=len(todos))
 
@@ -66,13 +86,12 @@ def fetch_texts() -> Iterator[Tuple[str, str]]:
         word = fields["word"]
         examples = try_json(egs) if (egs:=fields["examples"]) else []
 
-        # ban "that depends | it (all) depends"
+        # ban optional components. eg. "that depends | it (all) depends"
         ban_pattern = re.compile('[/|]')
         if not ban_pattern.search(word):
             yield fields["id"], normalize(word)
 
-        # skip sentence audio for beginner
-        if "K_基础" not in tags:
+        if should_add_sentence_audio(tags):
             for eg in examples:
                 yield eg["name"], normalize(eg["en"])
 
