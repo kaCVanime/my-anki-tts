@@ -43,6 +43,12 @@ def initialize_database():
     """)
     cursor.execute(
         """
+            CREATE INDEX IF NOT EXISTS idx_text
+            ON texts (text);
+        """
+    )
+    cursor.execute(
+        """
             CREATE INDEX IF NOT EXISTS idx_text_id
             ON tts_metadata (text_id);
         """
@@ -103,7 +109,7 @@ def get_all_text_ids():
             """
                 SELECT id
                 FROM texts
-            """,
+            """
         )
         result = cursor.fetchall()
         return [row[0] for row in result]
@@ -125,3 +131,35 @@ def has_voice(text_id, engine):
     result = cursor.fetchone()
     conn.close()
     return result is not None
+
+def reuse_audio(text_id, text):
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                    SELECT id
+                    FROM texts
+                    WHERE text = ?
+                    ORDER BY RANDOM()
+                    LIMIT 1
+                """
+            , (text,))
+            row = cursor.fetchone()
+            if row is not None:
+                id = row[0]
+                cursor.execute(
+                    """
+                        INSERT INTO tts_metadata (text_id, engine, voice, speed, audio_file)
+                        SELECT ?, engine, voice, speed, audio_file
+                        FROM tts_metadata
+                        WHERE text_id = ?
+                        ORDER BY RANDOM()
+                        LIMIT 1;
+                    """
+                    , (text_id, id)
+                )
+                conn.commit()
+        except Exception as e:
+            conn.rollback()
+            raise e

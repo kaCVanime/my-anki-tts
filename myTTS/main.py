@@ -9,7 +9,8 @@ from utils import (
     initialize_database,
     save_text_to_database,
     save_metadata_to_database,
-    has_voice
+    has_voice,
+    reuse_audio
 )
 
 # Configure logging
@@ -83,9 +84,15 @@ def main():
 
     # Fetch texts using the custom module
     logger.info("Starting text processing...")
-    for text_id, text in fetch_texts():
+    for text_id, typ, text in fetch_texts():
         logger.info(f"Processing text: (ID: {text_id}) {text[:50]}...")
         save_text_to_database(text_id, text)
+
+        try:
+            reuse_audio(text_id, text)
+        except Exception as e:
+            logger.error(f"Error reuse audio: {text_id}... ({e})")
+
         # Generate all possible combinations for each server
         for server in TTS_SERVERS:
             if has_voice(text_id, server["name"]):

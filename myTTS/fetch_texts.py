@@ -65,7 +65,7 @@ def should_add_sentence_audio(tags):
     # judge by B1-B2 CEFR for less common expressions
     return bool(set(tags) & {"CEFR_B1", "CEFR_B2"})
 
-def fetch_texts() -> Iterator[Tuple[str, str]]:
+def fetch_texts() -> Iterator[Tuple[str, str, str]]:
     """
     Fetches texts with unique IDs. This function can be customized by developers.
     :return: Iterator yielding tuples of (text_id, text).
@@ -89,9 +89,9 @@ def fetch_texts() -> Iterator[Tuple[str, str]]:
         # ban optional components. eg. "that depends | it (all) depends"
         ban_pattern = re.compile('[/|]')
         if not ban_pattern.search(word):
-            yield fields["id"], normalize(word)
+            yield fields["id"], "word", normalize(word)
 
         if should_add_sentence_audio(tags):
             for eg in examples:
-                yield eg["name"], normalize(eg["en"])
+                yield eg["name"], "eg", normalize(eg["en"])
 
