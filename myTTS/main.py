@@ -3,14 +3,16 @@ import json
 import requests
 from loguru import logger
 from fetch_texts import fetch_texts
+from pathlib import Path
 from utils import (
     get_random_voice_speed,
     get_random_voice_for_server,
     initialize_database,
     save_text_to_database,
     save_metadata_to_database,
-    has_voice,
-    reuse_audio
+    reuse_audio,
+    get_all_processed_text_ids,
+    mark_text_processed
 )
 
 # Configure logging
@@ -24,6 +26,8 @@ with open("config.json", "r") as config_file:
 TTS_SERVERS = config["tts_servers"]
 AUDIO_DIR = config["output_dir"]["audio"]
 
+(Path.cwd() / AUDIO_DIR).mkdir(exist_ok=True)
+
 
 def send_tts_request(server, text, voice, speed):
     """
@@ -35,7 +39,8 @@ def send_tts_request(server, text, voice, speed):
     :return: Response from the TTS server.
     """
     payload = {
-        "input": text,
+        # prevent tts swallow word
+        "input": ". " + text,
         "model": server["model"],
         "voice": voice,
         "speed": speed,
@@ -84,21 +89,37 @@ def main():
 
     # Fetch texts using the custom module
     logger.info("Starting text processing...")
-    for text_id, typ, text in fetch_texts():
-        logger.info(f"Processing text: (ID: {text_id}) {text[:50]}...")
-        save_text_to_database(text_id, text)
+
+    processed = get_all_processed_text_ids()
+
+    for text_id, text in fetch_texts():
+
+        if text_id in processed:
+            logger.info(f"Skipping text: (ID: {text_id})")
+            continue
 
         try:
-            reuse_audio(text_id, text)
+            save_text_to_database(text_id, text)
+        except Exception as e:
+            logger.error(f"Failed to save text to database: (ID: {text_id})... ({e})")
+            continue
+
+        # reuse audio for same engine
+        try:
+            if reuse_audio(text_id, text):
+                logger.info(f'Reuse audio success: (ID: {text_id})')
+                mark_text_processed(text_id)
+                continue
         except Exception as e:
             logger.error(f"Error reuse audio: {text_id}... ({e})")
 
-        # Generate all possible combinations for each server
+        # do TTS for each tts engine
         for server in TTS_SERVERS:
-            if has_voice(text_id, server["name"]):
-                logger.info(f"Skipping completed: (ID: {text_id}) (engine: {server['name']})")
-                continue
             process_text(text_id, text, server)
+
+        mark_text_processed(text_id)
+        logger.info(f"Process succeed: (ID: {text_id}) {text[:50]}...")
+
 
     logger.info("Text processing completed.")
 

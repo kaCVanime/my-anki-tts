@@ -3,7 +3,7 @@ from typing import Iterator, Tuple
 import re
 import json
 from loguru import logger
-from utils import find_anki_notes, get_anki_note, get_all_text_ids
+from utils import find_anki_notes
 from tqdm import tqdm
 
 logger.remove()
@@ -65,33 +65,45 @@ def should_add_sentence_audio(tags):
     # judge by B1-B2 CEFR for less common expressions
     return bool(set(tags) & {"CEFR_B1", "CEFR_B2"})
 
-def fetch_texts() -> Iterator[Tuple[str, str, str]]:
+# ban optional components. eg. "that depends | it (all) depends"
+ban_pattern = re.compile('[/|]')
+
+def process_word(fields, text_pbar):
+    word = fields["word"]
+    if not ban_pattern.search(word):
+        normalized_word = normalize(word)
+        yield fields["id"], normalized_word
+    text_pbar.update(1)
+
+def process_examples(examples, tags, text_pbar):
+    if should_add_sentence_audio(tags):
+        for eg in examples:
+            normalized_eg_en = normalize(eg["en"])
+            yield eg["name"], normalized_eg_en
+            text_pbar.update(1)
+    else:
+        text_pbar.update(len(examples))
+
+def fetch_texts() -> Iterator[Tuple[str, str]]:
     """
     Fetches texts with unique IDs. This function can be customized by developers.
     :return: Iterator yielding tuples of (text_id, text).
     """
+    todos = find_anki_notes(f'("deck:KEXP3::1. 读::1) 基础" OR "deck:KEXP3::1. 读::2) 高频::普通" OR "deck:KEXP3::1. 读::2) 高频::进阶" OR "deck:KEXP3::1. 读::3) 中频")')
 
-    text_ids = get_all_text_ids()
-    exclude_ids_query = " ".join([f'-id:{id}' for id in text_ids])
-    todos = find_anki_notes(f'("deck:KEXP3::1. 读::1) 基础" OR "deck:KEXP3::1. 读::2) 高频::普通" OR "deck:KEXP3::1. 读::2) 高频::进阶" OR "deck:KEXP3::1. 读::3) 中频") {exclude_ids_query}')
+    with tqdm(total=len(todos), desc="Processing notes") as note_pbar:
+        for note in todos:
+            fields = note["fields"]
+            tags = note["tags"]
 
-    progress = tqdm(total=len(todos))
+            examples = try_json(egs) if (egs:=fields["examples"]) else []
 
-    for nid in todos:
-        progress.update(1)
-        note = get_anki_note(nid)
-        fields = note["fields"]
-        tags = note["tags"]
+            with tqdm(total=len(examples) + 1, desc=f"Processing Texts in Note {fields['id']}", unit='text') as text_pbar:
+                try:
+                    yield from process_word(fields, text_pbar)
+                    yield from process_examples(examples, tags, text_pbar)
+                except Exception as e:
+                    logger.error(f"Error processing note {fields['id']}: {e}")
 
-        word = fields["word"]
-        examples = try_json(egs) if (egs:=fields["examples"]) else []
-
-        # ban optional components. eg. "that depends | it (all) depends"
-        ban_pattern = re.compile('[/|]')
-        if not ban_pattern.search(word):
-            yield fields["id"], "word", normalize(word)
-
-        if should_add_sentence_audio(tags):
-            for eg in examples:
-                yield eg["name"], "eg", normalize(eg["en"])
+            note_pbar.update(1)
 

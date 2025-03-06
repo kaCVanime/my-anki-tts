@@ -6,7 +6,7 @@ DB_PATH="tts_database.db"
 def get_random_voice_speed():
     return random.choices(
         [0.9, 1.0, 1.1],
-        weights=[1, 7.5, 1.5],
+        weights=[3, 9, 6],
         k=1
     )[0]
 
@@ -25,7 +25,8 @@ def initialize_database():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS texts (
             id TEXT PRIMARY KEY,
-            text TEXT NOT NULL
+            text TEXT NOT NULL,
+            has_audio INTEGER DEFAULT 0
         )
     """)
 
@@ -97,22 +98,35 @@ def save_metadata_to_database(text_id, engine, voice, speed, audio_file):
     cursor = conn.cursor()
     cursor.execute("""
         INSERT INTO tts_metadata (text_id, engine, voice, speed, audio_file)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?)
     """, (text_id, engine, voice, speed, audio_file))
     conn.commit()
     conn.close()
 
-def get_all_text_ids():
+def get_all_processed_text_ids():
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
         cursor.execute(
             """
                 SELECT id
                 FROM texts
+                WHERE has_audio = 1
             """
         )
         result = cursor.fetchall()
-        return [row[0] for row in result]
+        return {row[0] for row in result}
+
+def mark_text_processed(text_id):
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+                UPDATE texts
+                SET has_audio = 1
+                WHERE id = ?
+            """
+        , (text_id, ))
+
 
 def has_voice(text_id, engine):
     """
@@ -135,31 +149,34 @@ def has_voice(text_id, engine):
 def reuse_audio(text_id, text):
     with sqlite3.connect(DB_PATH) as conn:
         cursor = conn.cursor()
-        try:
-            cursor.execute(
-                """
-                    SELECT id
-                    FROM texts
-                    WHERE text = ?
-                    ORDER BY RANDOM()
-                    LIMIT 1
-                """
-            , (text,))
-            row = cursor.fetchone()
-            if row is not None:
-                id = row[0]
-                cursor.execute(
-                    """
-                        INSERT INTO tts_metadata (text_id, engine, voice, speed, audio_file)
-                        SELECT ?, engine, voice, speed, audio_file
-                        FROM tts_metadata
-                        WHERE text_id = ?
-                        ORDER BY RANDOM()
-                        LIMIT 1;
-                    """
-                    , (text_id, id)
-                )
-                conn.commit()
-        except Exception as e:
-            conn.rollback()
-            raise e
+
+        # Find a matching text with audio available
+        cursor.execute(
+            """
+                SELECT id
+                FROM texts
+                WHERE text = ? AND has_audio = 1
+                ORDER BY RANDOM()
+                LIMIT 1
+            """
+        , (text,))
+        row = cursor.fetchone()
+        if row is None:
+            return False  # No matching text with audio found
+
+        matched_text_id = row[0]
+
+        # Reuse one audio file per engine
+        cursor.execute(
+            """
+                INSERT INTO tts_metadata (text_id, engine, voice, speed, audio_file)
+                SELECT ?, engine, voice, speed, audio_file
+                FROM tts_metadata
+                WHERE text_id = ?
+                GROUP BY engine
+                ORDER BY RANDOM()
+            """,
+            (text_id, matched_text_id)
+        )
+        conn.commit()
+        return True
